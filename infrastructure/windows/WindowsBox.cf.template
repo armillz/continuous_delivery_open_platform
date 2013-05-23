@@ -1,8 +1,8 @@
 {
   "AWSTemplateFormatVersion" : "2010-09-09",
 
-  "Description" : "This template creates a single server installation of Microsoft SharePoint Foundation 2010. **WARNING** This template creates Amazon EC2 Windows instance and related resources. You will be billed for the AWS resources used if you create a stack from this template. Also, you are solely responsible for complying with the license terms for the software downloaded and installed by this template. By creating a stack from this template, you are agreeing to such terms.",
-
+  "Description" : "Template to build a basic Windows machine with EC2 tools and chef installed on it.",
+  
   "Parameters" : {
     "KeyPairName" : {
       "Description" : "Name of an existing Amazon EC2 key pair for RDP access",
@@ -11,7 +11,7 @@
     "InstanceType" : {
       "Description" : "Amazon EC2 instance type",
       "Type" : "String",
-      "Default" : "m1.large",
+      "Default" : "m1.small",
       "AllowedValues" : [ "m1.small", "m1.medium", "m1.large", "m1.xlarge", "m2.xlarge", "m2.2xlarge", "m2.4xlarge", "c1.medium", "c1.xlarge"]
     }
   },
@@ -31,17 +31,12 @@
     "AWSRegionArch2AMI" : {
       "us-east-1"      : {"64" : "ami-b5bcd2dc"},
       "us-west-2"      : {"64" : "ami-9f0d9baf"},
-      "us-west-1"      : {"64" : "ami-1fbf905a"},
-      "eu-west-1"      : {"64" : "ami-114c5d65"},
-      "ap-southeast-1" : {"64" : "ami-f2f1bea0"},
-      "ap-southeast-2" : {"64" : "ami-730a9a49"},
-      "ap-northeast-1" : {"64" : "ami-bd8f01bc"},
-      "sa-east-1"      : {"64" : "ami-707da76d"}
+      "us-west-1"      : {"64" : "ami-1fbf905a"}
     }
   },
 
   "Resources" : {
-    "SharePointFoundationSecurityGroup" : {
+    "WindowsBoxSecurityGroup" : {
       "Type" : "AWS::EC2::SecurityGroup",
       "Properties" : {
         "GroupDescription" : "Enable HTTP and RDP",
@@ -52,14 +47,8 @@
       }
     },
 
-    "SharePointFoundationEIP" : {
-      "Type" : "AWS::EC2::EIP",
-      "Properties" : {
-        "InstanceId" : { "Ref" : "SharePointFoundation" }
-      }
-    },
 
-    "SharePointFoundation": {
+    "WindowsBox": {
       "Type" : "AWS::EC2::Instance",
       "Metadata" : {
         "AWS::CloudFormation::Init" : {
@@ -76,25 +65,31 @@
                 "content": { "Fn::Join" : ["", [
                   "[cfn-auto-reloader-hook]\n",
                   "triggers=post.update\n",
-                  "path=Resources.SharePointFoundation.Metadata.AWS::CloudFormation::Init\n",
+                  "path=Resources.WindowsBox.Metadata.AWS::CloudFormation::Init\n",
                   "action=cfn-init.exe -v -s ", { "Ref" : "AWS::StackId" },
-                                                 " -r SharePointFoundation",
+                                                 " -r WindowsBox",
                                                  " --region ", { "Ref" : "AWS::Region" }, "\n"
                 ]]}
               },
-              "C:\\SharePoint\\SharePointFoundation2010.exe" : {
-                "source" : "http://d3adzpja92utk0.cloudfront.net/SharePointFoundation.exe"
+              "C:\\Downloads\\EC2tools.msi" : {
+                "source" : "http://sdk-for-net.amazonwebservices.com/latest/AWSToolsAndSDKForNet.msi"
+              },
+              "C:\\Downloads\\chef-install.msi" : {
+                "source" : "http://opscode.com/chef/install.msi"
+              },
+              "C:\\Downloads\\git-install.exe" : {
+                "source" : "https://msysgit.googlecode.com/files/Git-1.8.1.2-preview20130201.exe"
               }
             },
             "commands" : {
-              "1-extract" : {
-                "command" : "C:\\SharePoint\\SharePointFoundation2010.exe /extract:C:\\SharePoint\\SPF2010 /quiet /log:C:\\SharePoint\\SharePointFoundation2010-extract.log"
+              "1-ec2-install" : {
+                "command" : "C:\\Downloads\\EC2tools.msi /passive /log %TEMP%\\ec2-log.txt"
               },
-              "2-prereq" : {
-                "command" : "C:\\SharePoint\\SPF2010\\PrerequisiteInstaller.exe /unattended"
+              "2-chef-install" : {
+                "command" : "C:\\Downloads\\chef-install.msi /passive /log %TEMP%\\chef-log.txt"
               },
-              "3-install" : {
-                "command" : "C:\\SharePoint\\SPF2010\\setup.exe /config C:\\SharePoint\\SPF2010\\Files\\SetupSilent\\config.xml"
+              "3-git-install" : {
+                "command" : "C:\\Downloads\\git-install.exe /silent /norestart /log=%TEMP%\\git-log.txt"
               }
             },
             
@@ -114,40 +109,40 @@
         "InstanceType" : { "Ref" : "InstanceType" },
         "ImageId" : { "Fn::FindInMap" : [ "AWSRegionArch2AMI", { "Ref" : "AWS::Region" },
                       { "Fn::FindInMap" : [ "AWSInstanceType2Arch", { "Ref" : "InstanceType" }, "Arch" ] } ] },
-        "SecurityGroups" : [ {"Ref" : "SharePointFoundationSecurityGroup"} ],
+        "SecurityGroups" : [ {"Ref" : "WindowsBoxSecurityGroup"} ],
         "KeyName" : { "Ref" : "KeyPairName" },
         "UserData" : { "Fn::Base64" : { "Fn::Join" : ["", [
           "<script>\n",
 
           "cfn-init.exe -v -s ", { "Ref" : "AWS::StackId" }, 
-          " -r SharePointFoundation",
+          " -r WindowsBox",
           " --region ", { "Ref" : "AWS::Region" }, "\n",
 
-          "cfn-signal.exe -e %ERRORLEVEL% ", { "Fn::Base64" : { "Ref" : "SharePointFoundationWaitHandle" }}, "\n",
+          "cfn-signal.exe -e %ERRORLEVEL% ", { "Fn::Base64" : { "Ref" : "WindowsBoxWaitHandle" }}, "\n",
           
           "</script>"
           ]]}}
         }
     },
 
-    "SharePointFoundationWaitHandle" : {
+    "WindowsBoxWaitHandle" : {
       "Type" : "AWS::CloudFormation::WaitConditionHandle"
     },
 
-    "SharePointFoundationWaitCondition" : {
+    "WindowsBoxWaitCondition" : {
       "Type" : "AWS::CloudFormation::WaitCondition",
-      "DependsOn" : "SharePointFoundation",
+      "DependsOn" : "WindowsBox",
       "Properties" : {
-        "Handle" : {"Ref" : "SharePointFoundationWaitHandle"},
+        "Handle" : {"Ref" : "WindowsBoxWaitHandle"},
         "Timeout" : "3600"
       }
     }
   },
 
   "Outputs" : {
-    "SharePointFoundationURL" : {
-      "Value" : { "Fn::Join" : ["", ["http://", { "Ref" : "SharePointFoundationEIP" } ]] },
-      "Description" : "SharePoint Team Site URL. Please retrieve Administrator password of the instance and use it to access the URL"
+    "WindowsBoxURL" : {
+      "Value" : { "Fn::Join" : ["", ["http://", { "Fn::GetAtt" : [ "WindowsBox", "PublicDnsName" ] } ]] },
+      "Description" : "Windows Box URL. (Assuming IIS is installed, which it probably won't be in this particular configuration.) Please retrieve Administrator password of the instance and use it to access the URL"
     }
   }
 }
